@@ -41,16 +41,18 @@ class SIEMEstimator(BaseGraphEstimator):
         self.K = None
         self._has_been_fit = False
 
-    def fit(self, graph, edge_comm):
+    def fit(self, graph, edge_comm, is_categorical=True):
         """
         Fits an SIEM to a graph.
         Parameters
         ----------
-        graph : array_like [nxn] or networkx.Graph with n vertices
+        graph : array_like [n x n] or networkx.Graph with n vertices
             Input graph to fit
         edge_comm : array_like [n x n]
             A matrix giving the community assignments for each edge within the adjacency matrix
             of `graph`.
+        is_categorical : boolean, optional (default=False)
+            Whether the edges in the graph are binary/categorical (True) or not categorical (False).
         """
         graph = import_graph(graph)
 
@@ -80,6 +82,7 @@ class SIEMEstimator(BaseGraphEstimator):
         if self._has_been_fit:
             warnings.warn("A model has already been fit. Overwriting previous model...")
         self._has_been_fit = True
+        self._cat_edges = is_categorical
         return
 
     def summarize(self, wts, wtargs):
@@ -153,6 +156,10 @@ class SIEMEstimator(BaseGraphEstimator):
         methodargs: dictionary
             A dictionary of named trailing arguments to be passed ot the comparison function of
             interest.
+
+        Returns
+        -------
+        A tuple, depending on the method used. See the return argument for `method` for details.
         """
         if not self._has_been_fit:
             raise UnboundLocalError(
@@ -173,3 +180,33 @@ class SIEMEstimator(BaseGraphEstimator):
         return method(
             self.model[c1]["weights"], self.model[c2]["weights"], **methodargs
         )
+
+    def contingency_table(self):
+        """
+        A function for returning a contingency table if the underlying graph is categorical or binary.
+
+        Returns
+        -------
+        cont_tab: a [K x W] contingency table, where rows index edge communities, and columns
+            index one of the W possible outcome values. The [i,j] entry consists of the total
+            number of edges in community i which have a weight of j.
+        Comms: a [K] dimensional vector, indicating the community corresponding to a given
+            row of the contingency table.
+        Weights: a [W] dimensional vector, indicating the weight corresponding to a given
+            column of the contingency table.
+        """
+        if not self._has_been_fit:
+            raise UnboundLocalError(
+                "You must fit a model with `fit()` before computing a contingency table."
+            )
+        if not self._cat_edges:
+            raise TypeError(
+                "Contingency Tables can only be produced for graphs whose edges are categorical."
+            )
+        # compute the unique entries in the graph
+        Ws = np.unique(self.graph)
+        tab = np.zeros((len(self.model.keys()), len(Ws)))
+        for i, (c, val) in enumerate(self.model.items()):
+            for j, w in enumerate(Ws):
+                tab[i,j] = np.sum(val["weights"] == w)
+        return (tab, self.model.keys(), Ws)
